@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlanLens — AI Construction Plan Measurement</title>
+<style>
+  :root {
+    --bg:        #0f1117;
+    --surface:   #1a1d27;
+    --surface2:  #22263a;
+    --border:    #2e3350;
+    --accent:    #f59e0b;
+    --accent2:   #3b82f6;
+    --success:   #22c55e;
+    --danger:    #ef4444;
+    --warning:   #f97316;
+    --muted:     #6b7280;
+    --text:      #e5e7eb;
+    --text2:     #9ca3af;
+    --radius:    8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo { font-size: 20px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+  .logo span { color: var(--text); }
+  .tagline { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .header-right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .status-pill {
+    padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    background: var(--surface2); border: 1px solid var(--border);
+  }
+
+  /* ── Layout ──────────────────────────────────────────────── */
+  .workspace {
+    display: grid;
+    grid-template-columns: 220px 1fr 320px;
+    height: calc(100vh - 53px);
+  }
+
+  /* ── Left panel: page strip ──────────────────────────────── */
+  .pages-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .panel-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.8px; color: var(--muted); padding: 0 4px 6px;
+  }
+  .page-thumb {
+    border-radius: var(--radius);
+    border: 2px solid transparent;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color .15s, transform .1s;
+    position: relative;
+    background: var(--surface2);
+  }
+  .page-thumb:hover { border-color: var(--accent2); transform: translateX(2px); }
+  .page-thumb.active { border-color: var(--accent); }
+  .page-thumb img { width: 100%; display: block; }
+  .page-thumb .thumb-placeholder {
+    width: 100%; aspect-ratio: 1/1.414;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 11px;
+  }
+  .type-badge {
+    position: absolute; bottom: 4px; left: 4px; right: 4px;
+    background: rgba(0,0,0,.75); border-radius: 4px;
+    padding: 2px 6px; font-size: 10px; font-weight: 700;
+    text-align: center; letter-spacing: 0.4px;
+  }
+  .processing-overlay {
+    position: absolute; inset: 0;
+    background: rgba(15,17,23,.7);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .spinner {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* type badge colours */
+  .badge-floor    { color: var(--accent); }
+  .badge-demo     { color: var(--danger); }
+  .badge-elec     { color: #a78bfa; }
+  .badge-elev     { color: var(--accent2); }
+  .badge-site     { color: var(--success); }
+  .badge-other    { color: var(--muted); }
+
+  /* ── Centre panel: viewer ────────────────────────────────── */
+  .viewer-panel {
+    position: relative; overflow: auto;
+    background: #0a0c12;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 20px;
+  }
+  .upload-zone {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 40px;
+    border: 2px dashed var(--border); border-radius: var(--radius); margin: 20px;
+    cursor: pointer; transition: border-color .2s;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent); }
+  .upload-zone .upload-icon { font-size: 48px; }
+  .upload-zone h2 { font-size: 18px; font-weight: 600; }
+  .upload-zone p  { color: var(--muted); font-size: 13px; text-align: center; max-width: 300px; }
+  .upload-btn {
+    background: var(--accent); color: #000; font-weight: 700;
+    padding: 10px 24px; border-radius: var(--radius);
+    border: none; cursor: pointer; font-size: 14px;
+  }
+  .upload-btn:hover { opacity: .9; }
+  #file-input { display: none; }
+
+  .plan-container {
+    position: relative; display: inline-block;
+    box-shadow: 0 4px 40px rgba(0,0,0,.6);
+  }
+  .plan-container img { display: block; max-width: 100%; }
+
+  /* Measurement overlay boxes */
+  .m-overlay {
+    position: absolute;
+    border: 2px solid var(--accent);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background .15s;
+    box-sizing: border-box;
+  }
+  .m-overlay:hover, .m-overlay.highlighted {
+    background: rgba(245,158,11,.18);
+    border-color: #fde68a;
+  }
+  .m-overlay.approved  { border-color: var(--success); }
+  .m-overlay.rejected  { border-color: var(--danger); opacity: .45; }
+  .m-overlay.corrected { border-color: #60a5fa; }
+
+  .m-label-tag {
+    position: absolute; top: -20px; left: 0;
+    background: var(--accent); color: #000;
+    font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+    white-space: nowrap; pointer-events: none;
+  }
+  .m-overlay.approved  .m-label-tag { background: var(--success); color: #fff; }
+  .m-overlay.rejected  .m-label-tag { background: var(--danger);  color: #fff; }
+  .m-overlay.corrected .m-label-tag { background: #60a5fa; color: #000; }
+
+  /* ── Right panel: measurements ───────────────────────────── */
+  .measure-panel {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 13px;
+  }
+  .panel-header .count-pill {
+    background: var(--accent); color: #000;
+    border-radius: 12px; padding: 1px 8px; font-size: 11px;
+  }
+  .panel-scroll { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Scale info card */
+  .scale-card {
+    background: var(--surface2); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 10px 12px;
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+  .scale-card .scale-icon { font-size: 18px; flex-shrink: 0; }
+  .scale-card .scale-text { font-size: 12px; color: var(--text2); }
+  .scale-card .scale-val  { font-weight: 700; color: var(--text); font-size: 13px; }
+
+  /* Error banner */
+  .error-card {
+    background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3);
+    border-radius: var(--radius); padding: 8px 12px;
+    font-size: 12px; color: #fca5a5;
+  }
+  .error-card .err-type {
+    font-weight: 700; font-size: 10px; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--danger); margin-bottom: 3px;
+  }
+
+  /* Measurement card */
+  .m-card {
+    background: var(--surface2); border-radius: var(--radius);
+    border: 1px solid var(--border);
+    padding: 10px 12px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .m-card:hover, .m-card.active { border-color: var(--accent); background: #1e2133; }
+  .m-card.approved  { border-color: var(--success); }
+  .m-card.rejected  { border-color: var(--danger); opacity: .65; }
+  .m-card.corrected { border-color: #60a5fa; }
+
+  .m-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+  .m-card-label { font-weight: 600; font-size: 13px; line-height: 1.3; }
+  .m-card-value { font-size: 15px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+  .m-card.corrected .m-card-value { color: #60a5fa; }
+
+  .conf-bar { height: 3px; background: var(--border); border-radius: 2px; margin-bottom: 7px; }
+  .conf-fill { height: 100%; border-radius: 2px; background: var(--success); transition: width .3s; }
+
+  .m-card-reasoning { font-size: 11px; color: var(--text2); line-height: 1.5; margin-bottom: 8px; }
+
+  .m-actions { display: flex; gap: 6px; }
+  .btn {
+    flex: 1; padding: 5px 8px; border-radius: 5px;
+    border: 1px solid var(--border); background: transparent;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    color: var(--text); transition: background .15s, border-color .15s;
+  }
+  .btn:hover          { background: var(--surface); }
+  .btn.btn-approve    { border-color: var(--success); color: var(--success); }
+  .btn.btn-approve:hover { background: rgba(34,197,94,.15); }
+  .btn.btn-reject     { border-color: var(--danger); color: var(--danger); }
+  .btn.btn-reject:hover  { background: rgba(239,68,68,.15); }
+  .btn.btn-edit       { border-color: var(--accent2); color: var(--accent2); }
+  .btn.btn-edit:hover    { background: rgba(59,130,246,.15); }
+
+  /* Status chip inside m-card */
+  .status-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+    margin-bottom: 6px;
+  }
+  .chip-approved  { background: rgba(34,197,94,.15);  color: var(--success); }
+  .chip-rejected  { background: rgba(239,68,68,.12);  color: var(--danger); }
+  .chip-corrected { background: rgba(96,165,250,.15); color: #60a5fa; }
+
+  /* Export bar */
+  .export-bar {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .btn-export {
+    flex: 1; padding: 8px; background: var(--accent);
+    color: #000; font-weight: 700; border: none; border-radius: var(--radius);
+    cursor: pointer; font-size: 13px;
+  }
+  .btn-export:hover { opacity: .9; }
+  .btn-export:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Placeholder / empty states */
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; color: var(--muted); text-align: center; padding: 24px;
+  }
+  .empty-state .es-icon { font-size: 36px; }
+
+  /* Edit modal */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; width: 340px;
+  }
+  .modal h3 { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+  .modal label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .modal input {
+    width: 100%; padding: 8px 12px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-size: 15px; margin-bottom: 16px;
+  }
+  .modal-btns { display: flex; gap: 8px; }
+  .modal-btns .btn { flex: 1; padding: 8px; }
+
+  /* Progress bar */
+  .progress-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 3px; background: var(--border); z-index: 50;
+  }
+  .progress-fill { height: 100%; background: var(--accent); transition: width .3s; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 16px;
+    font-size: 13px; z-index: 200; opacity: 0;
+    transition: opacity .2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Plan<span>Lens</span></div>
+  <div class="tagline">AI Construction Plan Measurement · Human Verified</div>
+  <div class="header-right">
+    <div class="status-pill" id="header-status">Ready</div>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- Left: page strip -->
+  <div class="pages-panel" id="pages-panel">
+    <div class="panel-title">Pages</div>
+    <div class="empty-state" style="padding:20px;font-size:12px;">
+      Upload a plan set to begin
+    </div>
+  </div>
+
+  <!-- Centre: plan viewer -->
+  <div class="viewer-panel" id="viewer-panel">
+    <div class="upload-zone" id="upload-zone">
+      <div class="upload-icon">📐</div>
+      <h2>Drop a Construction Plan PDF</h2>
+      <p>Residential architectural plan sets only. Multi-page PDFs supported (up to 30 pages).</p>
+      <button class="upload-btn" onclick="document.getElementById('file-input').click()">
+        Choose PDF
+      </button>
+      <input type="file" id="file-input" accept=".pdf">
+    </div>
+  </div>
+
+  <!-- Right: measurements panel -->
+  <div class="measure-panel">
+    <div class="panel-header">
+      <span>Measurements</span>
+      <span class="count-pill" id="m-count">0</span>
+    </div>
+    <div class="panel-scroll" id="measure-scroll">
+      <div class="empty-state">
+        <div class="es-icon">📏</div>
+        <p>Select a floor plan page to review AI-extracted measurements.</p>
+      </div>
+    </div>
+    <div class="export-bar">
+      <button class="btn-export" id="export-btn" disabled onclick="exportApproved()">
+        Export Approved →
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Progress bar -->
+<div class="progress-bar" id="progress-bar" style="display:none">
+  <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+</div>
+
+<!-- Edit modal -->
+<div class="modal-bg" id="edit-modal" style="display:none" onclick="closeEditModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Correct Measurement</h3>
+    <label id="edit-label">Value</label>
+    <input type="number" id="edit-input" step="any">
+    <div class="modal-btns">
+      <button class="btn" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-approve" onclick="submitCorrection()">Save Correction</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'http://localhost:8000';
+
+// State
+let currentJobId = null;
+let currentPageNum = null;
+let pollTimer = null;
+let jobData = null;
+let editingMeasurementId = null;
+
+// ── File upload ──────────────────────────────────────────────────────────────
+
+const uploadZone = document.getElementById('upload-zone');
+const fileInput  = document.getElementById('file-input');
+
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault(); uploadZone.classList.add('drag-over');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pdf')) uploadFile(f);
+  else showToast('Please drop a PDF file.');
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+});
+
+async function uploadFile(file) {
+  setHeaderStatus('Uploading…', '#f59e0b');
+  showProgress(0);
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
+    if (!res.ok) { const e = await res.json(); showToast('Upload failed: ' + (e.detail || res.status)); return; }
+    const data = await res.json();
+    currentJobId = data.job_id;
+    currentPageNum = null;
+    jobData = null;
+
+    // Hide upload zone, clear panels
+    uploadZone.style.display = 'none';
+    document.getElementById('pages-panel').innerHTML = '<div class="panel-title">Pages</div>';
+    renderMeasurePanel(null, null);
+
+    startPolling(data.total_pages);
+  } catch (err) {
+    showToast('Network error: ' + err.message);
+    setHeaderStatus('Error', '#ef4444');
+  }
+}
+
+// ── Polling ──────────────────────────────────────────────────────────────────
+
+function startPolling(totalPages) {
+  stopPolling();
+  pollTimer = setInterval(() => poll(totalPages), 1800);
+  poll(totalPages);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function poll(totalPages) {
+  if (!currentJobId) return;
+  try {
+    const res = await fetch(`${API}/jobs/${currentJobId}`);
+    if (!res.ok) return;
+    jobData = await res.json();
+
+    const processed = jobData.pages_processed;
+    const pct = totalPages > 0 ? Math.round((processed / totalPages) * 100) : 0;
+    showProgress(pct);
+
+    renderPageStrip(jobData);
+
+    const statusMsg = jobData.status === 'complete'
+      ? `✓ ${totalPages} pages analysed`
+      : jobData.status === 'error'
+      ? '✗ Error'
+      : `Analysing page ${processed} / ${totalPages}…`;
+    setHeaderStatus(statusMsg,
+      jobData.status === 'complete' ? '#22c55e'
+      : jobData.status === 'error'  ? '#ef4444'
+      : '#f59e0b');
+
+    // Update export button
+    const approvedCount = countApproved(jobData);
+    const exportBtn = document.getElementById('export-btn');
+    exportBtn.disabled = approvedCount === 0;
+    exportBtn.textContent = approvedCount > 0
+      ? `Export ${approvedCount} Approved →`
+      : 'Export Approved →';
+
+    if (jobData.status === 'complete' || jobData.status === 'error') {
+      stopPolling();
+      hideProgress();
+    }
+
+    // Re-render current page if it's loaded
+    if (currentPageNum !== null) {
+      const pageResult = jobData.results.find(p => p.page_number === currentPageNum);
+      if (pageResult) renderMeasurePanel(pageResult.measurements, pageResult);
+    }
+
+  } catch (e) { /* ignore transient errors */ }
+}
+
+// ── Page strip ───────────────────────────────────────────────────────────────
+
+function renderPageStrip(job) {
+  const panel = document.getElementById('pages-panel');
+  panel.innerHTML = '<div class="panel-title">Pages (' + job.total_pages + ')</div>';
+
+  for (let i = 0; i < job.total_pages; i++) {
+    const result = job.results.find(r => r.page_number === i);
+    const thumb  = document.createElement('div');
+    thumb.className = 'page-thumb' + (i === currentPageNum ? ' active' : '');
+    thumb.dataset.page = i;
+
+    if (result) {
+      const imgEl = document.createElement('img');
+      imgEl.src = `${API}/pages/${job.job_id}/${i}/image`;
+      imgEl.alt = `Page ${i+1}`;
+      imgEl.loading = 'lazy';
+      thumb.appendChild(imgEl);
+
+      const badge = document.createElement('div');
+      badge.className = 'type-badge ' + typeBadgeClass(result.classification.page_type);
+      badge.textContent = shortType(result.classification.page_type);
+      thumb.appendChild(badge);
+
+      thumb.onclick = () => selectPage(i, result);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'thumb-placeholder';
+      placeholder.textContent = `Page ${i+1}`;
+      thumb.appendChild(placeholder);
+
+      const overlay = document.createElement('div');
+      overlay.className = 'processing-overlay';
+      overlay.innerHTML = '<div class="spinner"></div>';
+      thumb.appendChild(overlay);
+    }
+
+    panel.appendChild(thumb);
+  }
+}
+
+// ── Viewer: select page ───────────────────────────────────────────────────────
+
+function selectPage(pageNum, result) {
+  currentPageNum = pageNum;
+
+  // Update strip active state
+  document.querySelectorAll('.page-thumb').forEach(t => {
+    t.classList.toggle('active', parseInt(t.dataset.page) === pageNum);
+  });
+
+  // Render plan image with overlays
+  const viewer = document.getElementById('viewer-panel');
+  viewer.innerHTML = '';
+
+  const container = document.createElement('div');
+  container.className = 'plan-container';
+  container.id = 'plan-container';
+
+  const img = document.createElement('img');
+  img.src = `${API}/pages/${currentJobId}/${pageNum}/image`;
+  img.alt = `Page ${pageNum+1}`;
+  img.style.maxWidth = '100%';
+
+  img.onload = () => {
+    // Draw measurement overlays after image loads (so we know natural dimensions)
+    renderOverlays(container, result.measurements || []);
+  };
+
+  container.appendChild(img);
+  viewer.appendChild(container);
+
+  // Render the measurements sidebar
+  renderMeasurePanel(result.measurements || [], result);
+}
+
+// ── Measurement overlays ─────────────────────────────────────────────────────
+
+function renderOverlays(container, measurements) {
+  // Remove old overlays
+  container.querySelectorAll('.m-overlay').forEach(el => el.remove());
+
+  measurements.forEach(m => {
+    const box = document.createElement('div');
+    box.className = 'm-overlay ' + m.status;
+    box.id = 'overlay-' + m.id;
+    box.style.left   = (m.bbox.x * 100) + '%';
+    box.style.top    = (m.bbox.y * 100) + '%';
+    box.style.width  = (m.bbox.w * 100) + '%';
+    box.style.height = (m.bbox.h * 100) + '%';
+
+    const tag = document.createElement('div');
+    tag.className = 'm-label-tag';
+    const displayVal = m.status === 'corrected' ? m.corrected_value : m.value;
+    tag.textContent = `${displayVal} ${m.unit}`;
+    box.appendChild(tag);
+
+    box.addEventListener('click', () => scrollToCard(m.id));
+    box.addEventListener('mouseenter', () => highlightCard(m.id, true));
+    box.addEventListener('mouseleave', () => highlightCard(m.id, false));
+
+    container.appendChild(box);
+  });
+}
+
+// ── Measurements panel ───────────────────────────────────────────────────────
+
+function renderMeasurePanel(measurements, pageResult) {
+  const scroll = document.getElementById('measure-scroll');
+  const count  = document.getElementById('m-count');
+
+  if (!measurements || measurements.length === 0) {
+    count.textContent = '0';
+    let html = '';
+
+    if (pageResult && pageResult.scale) {
+      html += renderScaleCard(pageResult.scale);
+    }
+    if (pageResult && pageResult.errors && pageResult.errors.length) {
+      pageResult.errors.forEach(e => { html += renderErrorCard(e); });
+    }
+
+    if (!html) {
+      scroll.innerHTML = `<div class="empty-state">
+        <div class="es-icon">📏</div>
+        <p>Select a floor plan page to review AI-extracted measurements.</p>
+      </div>`;
+    } else {
+      scroll.innerHTML = html;
+    }
+    return;
+  }
+
+  count.textContent = measurements.length;
+  let html = '';
+
+  if (pageResult && pageResult.scale) {
+    html += renderScaleCard(pageResult.scale);
+  }
+  if (pageResult && pageResult.errors && pageResult.errors.length) {
+    pageResult.errors.forEach(e => { html += renderErrorCard(e); });
+  }
+
+  measurements.forEach(m => { html += renderMeasurementCard(m); });
+  scroll.innerHTML = html;
+}
+
+function renderScaleCard(scale) {
+  if (!scale) return '';
+  const icon = scale.found ? '📐' : '⚠️';
+  const val  = scale.found
+    ? `<div class="scale-val">${scale.notation || '—'} <span style="color:var(--muted);font-size:11px;font-weight:400">(${scale.unit || ''})</span></div>`
+    : `<div class="scale-val" style="color:var(--warning)">Scale not detected</div>`;
+  return `<div class="scale-card">
+    <div class="scale-icon">${icon}</div>
+    <div>
+      <div class="scale-text">Drawing scale</div>
+      ${val}
+      ${scale.error ? `<div class="scale-text" style="margin-top:3px;color:var(--warning)">${esc(scale.error)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderErrorCard(err) {
+  return `<div class="error-card">
+    <div class="err-type">${esc(err.error_type)}</div>
+    <div>${esc(err.message)}</div>
+  </div>`;
+}
+
+function renderMeasurementCard(m) {
+  const displayVal = m.status === 'corrected' ? m.corrected_value : m.value;
+  const confPct    = Math.round(m.confidence * 100);
+  const confColor  = m.confidence >= 0.9 ? 'var(--success)' : m.confidence >= 0.75 ? 'var(--accent)' : 'var(--warning)';
+
+  let statusChip = '';
+  if (m.status === 'approved')  statusChip = '<div class="status-chip chip-approved">✓ Approved</div>';
+  if (m.status === 'rejected')  statusChip = '<div class="status-chip chip-rejected">✗ Rejected</div>';
+  if (m.status === 'corrected') statusChip = `<div class="status-chip chip-corrected">✎ Corrected → ${m.corrected_value} ${m.unit}</div>`;
+
+  const actionDisabled = m.status !== 'pending' ? '' : '';
+
+  return `<div class="m-card ${m.status}" id="card-${m.id}"
+    onmouseenter="highlightOverlay('${m.id}', true)"
+    onmouseleave="highlightOverlay('${m.id}', false)"
+    onclick="scrollToOverlay('${m.id}')">
+    ${statusChip}
+    <div class="m-card-header">
+      <div class="m-card-label">${esc(m.label)}</div>
+      <div class="m-card-value">${displayVal} ${esc(m.unit)}</div>
+    </div>
+    <div class="conf-bar">
+      <div class="conf-fill" style="width:${confPct}%;background:${confColor}"></div>
+    </div>
+    <div class="m-card-reasoning">${esc(m.reasoning)}</div>
+    <div class="m-actions">
+      <button class="btn btn-approve" onclick="event.stopPropagation();actMeasurement('${m.id}','approve')">✓ Approve</button>
+      <button class="btn btn-reject"  onclick="event.stopPropagation();actMeasurement('${m.id}','reject')">✗ Reject</button>
+      <button class="btn btn-edit"    onclick="event.stopPropagation();openEditModal('${m.id}','${esc(m.label)}','${displayVal}','${esc(m.unit)}')">✎ Edit</button>
+    </div>
+  </div>`;
+}
+
+// ── Measurement actions ───────────────────────────────────────────────────────
+
+async function actMeasurement(id, action) {
+  if (!currentJobId) return;
+  try {
+    const res = await fetch(`${API}/jobs/${currentJobId}/measurements/${id}/${action}`, { method: 'POST' });
+    if (!res.ok) { showToast('Action failed.'); return; }
+
+    // Update local state
+    updateLocalMeasurementStatus(id, action);
+    rerenderCurrentPage();
+
+    const approvedCount = countApproved(jobData);
+    const exportBtn = document.getElementById('export-btn');
+    exportBtn.disabled = approvedCount === 0;
+    exportBtn.textContent = approvedCount > 0 ? `Export ${approvedCount} Approved →` : 'Export Approved →';
+
+    showToast(action === 'approve' ? '✓ Measurement approved' : '✗ Measurement rejected');
+  } catch (e) { showToast('Network error'); }
+}
+
+function updateLocalMeasurementStatus(id, action) {
+  if (!jobData) return;
+  for (const page of jobData.results) {
+    for (const m of page.measurements) {
+      if (m.id === id) { m.status = action === 'approve' ? 'approved' : 'rejected'; return; }
+    }
+  }
+}
+
+// ── Edit modal ────────────────────────────────────────────────────────────────
+
+function openEditModal(id, label, currentVal, unit) {
+  editingMeasurementId = id;
+  document.getElementById('edit-label').textContent = `New value for "${label}" (${unit})`;
+  document.getElementById('edit-input').value = currentVal;
+  document.getElementById('edit-modal').style.display = 'flex';
+  document.getElementById('edit-input').focus();
+}
+
+function closeEditModal(event) {
+  if (event && event.target !== document.getElementById('edit-modal')) return;
+  document.getElementById('edit-modal').style.display = 'none';
+  editingMeasurementId = null;
+}
+
+async function submitCorrection() {
+  if (!editingMeasurementId || !currentJobId) return;
+  const newVal = parseFloat(document.getElementById('edit-input').value);
+  if (isNaN(newVal)) { showToast('Please enter a valid number.'); return; }
+
+  try {
+    const res = await fetch(
+      `${API}/jobs/${currentJobId}/measurements/${editingMeasurementId}/correct?new_value=${newVal}`,
+      { method: 'POST' }
+    );
+    if (!res.ok) { showToast('Correction failed.'); return; }
+
+    // Update local state
+    if (jobData) {
+      for (const page of jobData.results) {
+        for (const m of page.measurements) {
+          if (m.id === editingMeasurementId) {
+            m.corrected_value = newVal; m.status = 'corrected'; break;
+          }
+        }
+      }
+    }
+
+    document.getElementById('edit-modal').style.display = 'none';
+    editingMeasurementId = null;
+    rerenderCurrentPage();
+    showToast('✎ Measurement corrected');
+
+    const approvedCount = countApproved(jobData);
+    const exportBtn = document.getElementById('export-btn');
+    exportBtn.disabled = approvedCount === 0;
+    exportBtn.textContent = approvedCount > 0 ? `Export ${approvedCount} Approved →` : 'Export Approved →';
+  } catch (e) { showToast('Network error'); }
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+
+async function exportApproved() {
+  if (!currentJobId) return;
+  try {
+    const res = await fetch(`${API}/jobs/${currentJobId}/export`);
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `planlens-export-${currentJobId}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    showToast(`✓ Exported ${data.total_approved} measurements`);
+  } catch (e) { showToast('Export failed'); }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function rerenderCurrentPage() {
+  if (currentPageNum === null || !jobData) return;
+  const pageResult = jobData.results.find(p => p.page_number === currentPageNum);
+  if (!pageResult) return;
+
+  const container = document.getElementById('plan-container');
+  if (container) renderOverlays(container, pageResult.measurements || []);
+  renderMeasurePanel(pageResult.measurements || [], pageResult);
+}
+
+function scrollToCard(id) {
+  const card = document.getElementById('card-' + id);
+  if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); card.classList.add('active'); setTimeout(() => card.classList.remove('active'), 1200); }
+}
+
+function scrollToOverlay(id) {
+  const box = document.getElementById('overlay-' + id);
+  if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function highlightCard(id, on) {
+  const card = document.getElementById('card-' + id);
+  if (card) card.classList.toggle('active', on);
+}
+
+function highlightOverlay(id, on) {
+  const box = document.getElementById('overlay-' + id);
+  if (box) box.classList.toggle('highlighted', on);
+}
+
+function countApproved(job) {
+  if (!job) return 0;
+  let n = 0;
+  for (const page of job.results)
+    for (const m of page.measurements)
+      if (m.status === 'approved' || m.status === 'corrected') n++;
+  return n;
+}
+
+function typeBadgeClass(type) {
+  if (type === 'FLOOR_PLAN')       return 'badge-floor';
+  if (type === 'DEMOLITION_PLAN')  return 'badge-demo';
+  if (type === 'ELECTRICAL_PLAN')  return 'badge-elec';
+  if (type === 'ELEVATION')        return 'badge-elev';
+  if (type === 'SITE_PLAN')        return 'badge-site';
+  return 'badge-other';
+}
+
+function shortType(type) {
+  const map = {
+    FLOOR_PLAN:'FLOOR', ELEVATION:'ELEV', SECTION:'SECT',
+    ELECTRICAL_PLAN:'ELEC', PLUMBING_PLAN:'PLUMB', DEMOLITION_PLAN:'DEMO',
+    SITE_PLAN:'SITE', ROOF_PLAN:'ROOF', RENDER_3D:'3D',
+    DETAIL_DRAWING:'DETAIL', SCHEDULE_LEGEND:'SCHED', OTHER:'OTHER'
+  };
+  return map[type] || type;
+}
+
+function setHeaderStatus(msg, color) {
+  const el = document.getElementById('header-status');
+  el.textContent = msg; el.style.color = color || 'var(--text)';
+}
+
+function showProgress(pct) {
+  document.getElementById('progress-bar').style.display = 'block';
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+function hideProgress() {
+  setTimeout(() => { document.getElementById('progress-bar').style.display = 'none'; }, 600);
+}
+
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Handle Enter in edit modal
+document.getElementById('edit-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitCorrection();
+  if (e.key === 'Escape') closeEditModal({ target: document.getElementById('edit-modal') });
+});
+</script>
+</body>
+</html>
